@@ -253,6 +253,182 @@ server.tool(
   }
 );
 
+server.tool(
+  "generate_social_post",
+  "Generate a social media post in Ronen Tanchum's voice for @ronentanchum or @Phenomenalabs. Provide a topic or prompt and specify the account.",
+  {
+    topic: z.string().describe("What the post should be about (e.g. 'Classical Revival drop', 'the living system concept', 'touch and generative art')"),
+    account: z.enum(["ronentanchum", "phenomenalabs"]).describe("Which account: 'ronentanchum' (personal artist voice) or 'phenomenalabs' (studio/collector voice)"),
+    format: z.enum(["single", "thread"]).optional().describe("'single' for one post, 'thread' for a 3-5 post thread. Defaults to single."),
+  },
+  async ({ topic, account, format = "single" }) => {
+    if (!anthropic) {
+      return { content: [{ type: "text", text: "Requires ANTHROPIC_API_KEY." }], isError: true };
+    }
+
+    const accountContext = account === "ronentanchum"
+      ? `You are writing for @ronentanchum — Ronen's personal artist account (2,289 followers). Voice: deeply personal, poetic, the artist speaking from inside the work. Never promotional.`
+      : `You are writing for @Phenomenalabs — the studio account (4,466 followers). Audience: Art Blocks collectors. Voice: curatorial, informational, conceptual. Still not promotional.`;
+
+    const formatInstructions = format === "thread"
+      ? `Write a thread of 3-5 posts. Number them 1/N, 2/N etc. Each post must be under 280 characters and stand alone. The thread should build an argument or narrative.`
+      : `Write a single post under 280 characters. Let the image or context do the heavy lifting — keep copy minimal.`;
+
+    const systemPrompt = `${ARTIST_SYSTEM_PROMPT}
+
+${accountContext}
+
+SOCIAL MEDIA RULES:
+- No hashtag spam (zero or one hashtag maximum, only if essential)
+- Minimal emojis (none unless the studio account and very purposeful)
+- No exclamation marks
+- No marketing language
+- Links go at the end: classicalrevival.art or artblocks.io
+- ${formatInstructions}`;
+
+    const message = await anthropic.messages.create({
+      model: "claude-opus-4-6",
+      max_tokens: 1024,
+      system: systemPrompt,
+      messages: [{ role: "user", content: `Write a post about: ${topic}` }],
+    });
+
+    const text = message.content[0].type === "text" ? message.content[0].text : "Unable to generate.";
+
+    return {
+      content: [{
+        type: "text",
+        text: `**@${account} — ${format}**\n\n${text}`,
+      }],
+    };
+  }
+);
+
+server.tool(
+  "get_press_kit",
+  "Returns Ronen Tanchum's press kit — biography, artist statement, current projects, credentials, and contact information. For journalists, curators, and institutions.",
+  {},
+  async () => {
+    return {
+      content: [{
+        type: "text",
+        text: `# Ronen Tanchum — Press Kit
+
+## Short Bio (50 words)
+Ronen Tanchum is a New York-based generative and AI artist and founder of Phenomena Labs. His work encodes classical compositional logic into living systems — computation that blooms, branches, and costs something. He is a WEF Cultural Leader and member of OpenAI's Alpha Artist Program.
+
+## Long Bio (150 words)
+Ronen Tanchum works at the intersection of generative systems, nature, computation, and the baroque visual tradition. His practice produces systems — not images. What he makes continues to behave after it is made.
+
+His installations have been exhibited at the World Economic Forum in Davos (2025 and 2026), in permanent commissions across three countries, and on Art Blocks, the leading platform for on-chain generative art. He holds Grammy-nominated and Academy Award-nominated credits in visual effects, bringing industrial-scale craft to a practice fundamentally concerned with what happens when computation meets the organic world.
+
+He is a member of OpenAI's Alpha Artist Program, a WEF Cultural Leader, and founder of Phenomena Labs, a New York-based generative art studio.
+
+## Artist Statement
+The weight and wonder of computation should be something audiences can feel. Every bloom produced by my systems carries the actual cost of the computation required to generate it. Beauty and weight are simultaneous — inseparable.
+
+The baroque tradition is my primary frame: abundance, mortality, light, excess. I ask what that tradition has to say about the age of artificial intelligence. My answer is made visible, not argued.
+
+## Current Projects
+- **CLASSICAL REVIVAL** (2026) — Generative art on Art Blocks. Drops April 16, 2026. classicalrevival.art
+- **ATELIER NODEUL 2026** — Media facade commission, Nodeul Island, Seoul. July–August 2026.
+- **A FLOWER IS NOT A FLOWER** — Proposed installation, Bass Museum Rotunda, Miami.
+
+## Credentials
+- WEF Cultural Leader (World Economic Forum)
+- OpenAI Alpha Artist Program
+- Academy Award nomination (VFX)
+- Grammy nomination (VFX)
+- Solo exhibition, Tel Aviv Museum of Art
+- Permanent installations in 3 countries
+
+## Contact
+Studio: studio@phenomenalabs.com
+Web: ronentanchum.art
+X: @ronentanchum / @Phenomenalabs`,
+      }],
+    };
+  }
+);
+
+server.tool(
+  "get_artist_statement",
+  "Returns a formatted artist statement tailored for a specific context: exhibition, grant application, residency, or general use.",
+  {
+    context: z.enum(["exhibition", "grant", "residency", "general"]).describe("The context this statement will be used in"),
+    project: z.string().optional().describe("Specific project to focus on, e.g. 'CLASSICAL REVIVAL'. If omitted, returns a general practice statement."),
+  },
+  async ({ context, project }) => {
+    if (!anthropic) {
+      return { content: [{ type: "text", text: "Requires ANTHROPIC_API_KEY." }], isError: true };
+    }
+
+    const contextInstructions: Record<string, string> = {
+      exhibition: "Write for an exhibition wall label or catalog. 150-200 words. Audiences are gallery visitors — informed but not specialists. Focus on what the work does and why it matters now.",
+      grant: "Write for a grant application. 250-300 words. Committees are institutional — they want to understand the practice, the research question, and the cultural stakes. Be specific about method and ambition.",
+      residency: "Write for a residency application. 200-250 words. Emphasize process, research direction, and what you need space and time to develop. Make the reader want to give you that time.",
+      general: "Write a general-purpose artist statement. 150-200 words. Suitable for press, bio pages, and introductions.",
+    };
+
+    const projectFocus = project
+      ? `Focus specifically on the project: ${project}`
+      : "Focus on the overall practice and artistic philosophy.";
+
+    const message = await anthropic.messages.create({
+      model: "claude-opus-4-6",
+      max_tokens: 1024,
+      system: ARTIST_SYSTEM_PROMPT,
+      messages: [{
+        role: "user",
+        content: `Write an artist statement for the following context: ${contextInstructions[context]}\n\n${projectFocus}\n\nWrite in first person as Ronen. Be precise and concrete. No marketing language.`,
+      }],
+    });
+
+    const text = message.content[0].type === "text" ? message.content[0].text : "Unable to generate.";
+
+    return {
+      content: [{
+        type: "text",
+        text: `**Artist Statement — ${context}${project ? ` / ${project}` : ""}**\n\n${text}`,
+      }],
+    };
+  }
+);
+
+server.tool(
+  "get_upcoming",
+  "Returns Ronen Tanchum's upcoming events, drops, exhibitions, and appearances.",
+  {},
+  async () => {
+    return {
+      content: [{
+        type: "text",
+        text: `# Ronen Tanchum — Upcoming
+
+## April 16, 2026
+**CLASSICAL REVIVAL** — Art Blocks drop
+Generative art release on Art Blocks (artblocks.io)
+"A living system. Not an image collection."
+classicalrevival.art
+
+## July–August 2026
+**ATELIER NODEUL 2026** — Seoul, South Korea
+Media facade commission for Nodeul Island
+49m × 7.7m wall + 49m × 14m floor
+Han River waterfront, Seoul Metropolitan Government program
+
+## Proposed / In Development
+**A FLOWER IS NOT A FLOWER** — Bass Museum, Miami
+Large-scale floral sculptural installation for the Bass Rotunda
+Status: proposal stage
+
+## Contact for Press / Attendance
+studio@phenomenalabs.com`,
+      }],
+    };
+  }
+);
+
 // ─── HTTP Server with SSE Transport ──────────────────────────────────────────
 
 const app = express();
@@ -268,7 +444,7 @@ app.get("/", (_req, res) => {
     studio: "Phenomena Labs",
     website: "https://ronentanchum.art",
     mcp_endpoint: "/sse",
-    tools: ["browse_portfolio", "get_artwork", "get_artist_profile", "ask_ronen", "request_collaboration"],
+    tools: ["browse_portfolio", "get_artwork", "get_artist_profile", "ask_ronen", "request_collaboration", "generate_social_post", "get_press_kit", "get_artist_statement", "get_upcoming"],
     resources: ["artist://ronen-tanchum/profile", "artist://ronen-tanchum/works", "artist://ronen-tanchum/philosophy"],
   });
 });
