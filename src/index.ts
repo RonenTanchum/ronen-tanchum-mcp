@@ -2,10 +2,13 @@ import express from "express";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import Anthropic from "@anthropic-ai/sdk";
+import axios from "axios";
 import { z } from "zod";
 import { profile } from "./data/profile.js";
 import { works, getWorkByTitle } from "./data/works.js";
 import { ARTIST_SYSTEM_PROMPT, VOICE_EXAMPLES } from "./data/voice.js";
+
+const ARTWORK_AGENT_URL = process.env.ARTWORK_AGENT_URL ?? "http://localhost:3001";
 
 // ─── Setup ───────────────────────────────────────────────────────────────────
 
@@ -429,6 +432,39 @@ studio@phenomenalabs.com`,
   }
 );
 
+server.tool(
+  "create_artwork",
+  "Generate a unique visual artwork collage from Ronen Tanchum's portfolio in response to any prompt, in any language. The system selects relevant works, composes them into a collage, and returns a poetic response in the same language as the prompt.",
+  {
+    prompt: z.string().describe("Any prompt in any language. The artwork and response text will be generated in the same language."),
+  },
+  async ({ prompt }) => {
+    try {
+      const res = await axios.post(`${ARTWORK_AGENT_URL}/artwork`, { prompt }, { timeout: 30000 });
+      const { image, text, language, artworks: selected } = res.data;
+
+      return {
+        content: [
+          {
+            type: "image",
+            data: image.replace("data:image/png;base64,", ""),
+            mimeType: "image/png",
+          },
+          {
+            type: "text",
+            text: `**Language detected:** ${language}\n\n**Response:**\n${text}\n\n**Works selected:** ${selected.map((a: { title: string }) => a.title).join(", ")}`,
+          },
+        ],
+      };
+    } catch {
+      return {
+        content: [{ type: "text", text: `Artwork agent unavailable. Ensure artwork-agent is running at ${ARTWORK_AGENT_URL}.` }],
+        isError: true,
+      };
+    }
+  }
+);
+
 // ─── HTTP Server with SSE Transport ──────────────────────────────────────────
 
 const app = express();
@@ -444,7 +480,7 @@ app.get("/", (_req, res) => {
     studio: "Phenomena Labs",
     website: "https://ronentanchum.art",
     mcp_endpoint: "/sse",
-    tools: ["browse_portfolio", "get_artwork", "get_artist_profile", "ask_ronen", "request_collaboration", "generate_social_post", "get_press_kit", "get_artist_statement", "get_upcoming"],
+    tools: ["browse_portfolio", "get_artwork", "get_artist_profile", "ask_ronen", "request_collaboration", "generate_social_post", "get_press_kit", "get_artist_statement", "get_upcoming", "create_artwork"],
     resources: ["artist://ronen-tanchum/profile", "artist://ronen-tanchum/works", "artist://ronen-tanchum/philosophy"],
   });
 });
